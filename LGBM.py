@@ -49,9 +49,9 @@ def calculate_operating_hours(row):
 # 2. 메인 파이프라인
 # =========================
 def main():
-    FEATURE = "Feature.xlsx"
-    TRAIN = "POS_train_val.csv"
-    TEST = "POS_test.csv"
+    FEATURE = "Data/Feature.xlsx"
+    TRAIN = "Data/POS_train_val.csv"
+    TEST = "Data/POS_test.csv"
 
     # ---------- (1) 데이터 로드 ----------
     feat = pd.read_excel(FEATURE)
@@ -201,10 +201,6 @@ def main():
 
     print("\nTest prediction head:")
     print(result_df.head(20))
-
-    # 필요하면 CSV로 저장
-    result_df.to_csv("cafe_test_predictions_lag_rolling.csv", index=False)
-    print("\nSaved to cafe_test_predictions_lag_rolling.csv")
 
 
 if __name__ == "__main__":
