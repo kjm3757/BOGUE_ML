@@ -1,103 +1,151 @@
-# BOGUE_ML – Campus Cafe Sales Forecasting
+# 📊 BOGUE_ML – Campus Cafe Sales Forecasting
 
-이 프로젝트는 **학사 일정 + POS 매출 데이터**를 기반으로  
-캠퍼스 카페의 **일 매출을 예측하는 머신러닝 모델(LightGBM, XGBoost)** 구현 프로젝트입니다.
+이 프로젝트는 **학사 일정 데이터 + POS 매출 데이터**를 이용해  
+캠퍼스 카페의 **일일 매출을 예측하는 머신러닝 모델(LightGBM, XGBoost)**을 구현합니다.
 
-데이터 전처리 → Feature Engineering → 모델 학습 → Test 예측까지 하나의 파이프라인으로 구성되어 있습니다.
-
+데이터 전처리 → 피처 엔지니어링 → 모델 학습 → 테스트 예측까지  
+완전한 머신러닝 파이프라인으로 구성되어 있습니다.
 
 ---
 
 ## 📁 Project Structure
 
+```
+
 BOGUE_ML/
 ├─ Data/
-│ ├─ Feature.xlsx
-│ ├─ POS_train_val.csv
-│ └─ POS_test.csv
+│   ├─ Feature.xlsx
+│   ├─ POS_train_val.csv
+│   └─ POS_test.csv
 ├─ LGBM.py
 ├─ XGB.py
 ├─ requirements.txt
 └─ README.md
 
+````
+
 ---
 
-## 🔧 Environment Setup (환경 설정)
+## 🛠️ Environment Setup
 
-아래 명령어로 필요한 패키지를 한 번에 설치할 수 있습니다.
+아래 명령어 한 번으로 환경을 세팅할 수 있습니다.
 
 ```bash
 pip install -r requirements.txt
+````
 
-✔ requirements.txt 내용
+### ✔ requirements.txt 내용
+
+```
 pandas
 numpy
 scikit-learn
 lightgbm
 xgboost
 openpyxl
+```
 
+---
 
-📌 Data Description
+## 📦 Data Description
 
-Feature.xlsx
-학사 일정 기반 Feature (요일, 학기/방학, 공휴일, 시험 일정 등)
+**Feature.xlsx**
 
-POS_train_val.csv
-2023~2024 POS 매출 데이터 (Train/Val)
+* 날짜별 학사 일정 Feature
+* 요일, 방학/학기 여부
+* 공휴일, 시험 일정 등 포함
 
-POS_test.csv
-예측 대상 Test 데이터
+**POS_train_val.csv**
 
-🛠 실행 방법
+* POS 매출 데이터 (Train/Validation)
 
-1. LightGBM 모델 실행
+**POS_test.csv**
+
+* 예측 대상 Test 데이터
+
+---
+
+## 🚀 How to Run
+
+### ▶ LightGBM 모델 실행
+
+```bash
 python LGBM.py
+```
 
-2. XGBoost 모델 실행
+### ▶ XGBoost 모델 실행
+
+```bash
 python XGB.py
+```
 
-🎯 주요 기능 요약
-✔ Feature Engineering
+---
 
-Lag Features (1, 2, 3, 7, 14, 28)
+## 🧠 Feature Engineering Overview
 
-Rolling Mean/Std (7, 14, 28)
+본 프로젝트에서는 20개 이상의 Feature가 자동 생성됩니다.
 
-시험 기간 window(exam_before3, exam_after3)
+### ✔ Time-Series Features
 
-학기 × 주말 교차항
+* Lag Features: `Lag1`, `Lag2`, `Lag3`, `Lag7`, `Lag14`, `Lag28`
+* Rolling Means: `RollingMean7`, `RollingMean14`, `RollingMean28`
+* Rolling Stds: `RollingStd7`, `RollingStd14`, `RollingStd28`
 
-운영시간 Feature 자동 계산
+### ✔ Academic Calendar Features
 
-요일 One-hot Encoding
+* 학기/방학 구분
+* 시험 기간 window: `exam_before3`, `exam_after3`
+* 주말 여부 `weekend`
+* 학기 × 주말 교차항 `semester_weekend`
 
-✔ Model
+### ✔ Custom Operating Hours
 
-LightGBM (LGBMRegressor)
+* 요일 + 학기 + 공휴일 기반 카페 운영시간 자동 계산
+  (예: 월~금 12시간, 토 7시간, 일요일 0시간 등)
 
-XGBoost (XGBRegressor)
+### ✔ Categorical Features
 
-✔ Metrics
+* 요일(weekday) → One-hot encoding
 
-MAE
+---
 
-RMSE
+## 📈 Model Overview
 
-SMAPE
+### 🔹 LightGBM
 
-📊 Output Example
+* `LGBMRegressor`
+* 빠르고 효율적인 트리 기반 모델
+* Feature importance 확인 가능
 
-Validation 성능 출력
+### 🔹 XGBoost
 
-Test 예측 성능 출력
+* `XGBRegressor`
+* 강력한 성능의 boosting 모델
+* 자동 overfitting 방지 기능 포함
 
-Feature Importance (LightGBM)
+---
 
-Test 예측 결과 테이블 (상위 20개)
+## 🎯 Evaluation Metrics
 
-👥 Contributors
+모델 성능은 다음 3개 지표로 평가합니다.
 
-Team BOGUE ML
+* **MAE** (Mean Absolute Error)
+* **RMSE** (Root Mean Squared Error)
+* **SMAPE** (Symmetric Mean Absolute Percentage Error)
 
-강민서 김정민 성세은
+---
+
+## 📊 Output Example
+
+* Validation 성능 출력
+* Test 성능 출력
+* LightGBM Feature Importance (상위 30개)
+* Test 예측 결과 테이블 (상위 20개)
+
+---
+
+## 👥 Contributors
+
+**Team BOGUE ML**
+
+* 강민서 김정민 성세은
