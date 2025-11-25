@@ -1,7 +1,7 @@
 # 📊 BOGUE_ML – Campus Cafe Sales Forecasting
 
 이 프로젝트는 **학사 일정 데이터 + POS 매출 데이터**를 이용해  
-캠퍼스 카페의 **일일 매출을 예측하는 머신러닝 모델(LightGBM, XGBoost)**을 구현합니다.
+캠퍼스 카페의 **일일 매출을 예측하는 머신러닝 모델**을 구현합니다.
 
 데이터 전처리 → 피처 엔지니어링 → 모델 학습 → 테스트 예측까지  
 완전한 머신러닝 파이프라인으로 구성되어 있습니다.
@@ -146,6 +146,6 @@ python XGB.py
 
 ## 👥 Contributors
 
-**Team BOGUE ML**
+**Team BOGUE**
 
 * 강민서 김정민 성세은
