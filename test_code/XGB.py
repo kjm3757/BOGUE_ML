@@ -15,9 +15,9 @@ def smape(y_true, y_pred):
 # =========================
 # 1. 데이터 불러오기 (Train/Val + Test)
 # =========================
-feature_path = "Data/Feature.xlsx"
-pos_trainval_path = "Data/POS_train_val.csv"
-pos_test_path = "Data/POS_test.csv"
+feature_path = "../Data/Feature.xlsx"
+pos_trainval_path = "../Data/POS_train_val.csv"
+pos_test_path= "../Data/POS_test.csv"
 
 feat = pd.read_excel(feature_path)
 pos_tv = pd.read_csv(pos_trainval_path)
