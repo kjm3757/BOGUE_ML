@@ -144,28 +144,77 @@ def main():
     print("\nFeature columns:", len(feature_cols))
     print(feature_cols)
 
-    # ---------- (5) LightGBM 학습 ----------
+    # ---------- (5) Hyperparameter Tuning (LightGBM) ----------
+    from itertools import product
+
+    # 튜닝할 하이퍼파라미터 후보들
+    param_grid = {
+        "num_leaves":       [15, 31, 63],   # 리프 개수(복잡도)
+        "learning_rate":    [0.03, 0.05],   # 학습률 (작을수록 느리지만 안정적)
+        "n_estimators":     [400, 800],     # 트리 개수
+        "min_child_samples":[20, 40],       # 리프에 들어갈 최소 데이터 수
+        "subsample":        [0.7, 0.9],     # row sampling 비율
+        "colsample_bytree": [0.7, 0.9],     # column sampling 비율
+    }
+
+    best_rmse = np.inf
+    best_params = None
+
+    print("\n===== Hyperparameter Search (based on Val RMSE) =====")
+    # 모든 조합을 하나씩 돌면서 RMSE 제일 작은 조합 찾기
+    for num_leaves, lr, n_estimators, min_child, subsample, colsample in product(
+        param_grid["num_leaves"],
+        param_grid["learning_rate"],
+        param_grid["n_estimators"],
+        param_grid["min_child_samples"],
+        param_grid["subsample"],
+        param_grid["colsample_bytree"],
+    ):
+        params = {
+            "num_leaves": num_leaves,
+            "learning_rate": lr,
+            "n_estimators": n_estimators,
+            "min_child_samples": min_child,
+            "subsample": subsample,
+            "colsample_bytree": colsample,
+        }
+
+        reg_tmp = lgb.LGBMRegressor(
+            objective="regression",
+            random_state=42,
+            **params,
+        )
+
+        reg_tmp.fit(X_train, y_train)
+        val_pred_tmp = reg_tmp.predict(X_val)
+        rmse_tmp = np.sqrt(mean_squared_error(y_val, val_pred_tmp))
+
+        if rmse_tmp < best_rmse:
+            best_rmse = rmse_tmp
+            best_params = params
+
+    print("\n>>> Best Params (by Val RMSE):")
+    print(best_params)
+    print(f">>> Best Val RMSE: {best_rmse:,.2f}")
+
+    # ---------- (6) Best 모델을 Train+Val 전체로 재학습 ----------
+    X_train_full = df_sorted[feature_cols]
+    y_train_full = df_sorted["daily"]
+
     reg = lgb.LGBMRegressor(
         objective="regression",
-        learning_rate=0.05,
-        n_estimators=800,
-        num_leaves=31,
-        subsample=0.8,
-        colsample_bytree=0.9,
-        min_child_samples=30,
-        random_state=42
+        random_state=42,
+        **best_params,
     )
+    reg.fit(X_train_full, y_train_full)
 
-    reg.fit(X_train, y_train)
-
-    # ---------- (6) Validation 평가 ----------
+    # 참고용으로 다시 Val 성능도 한 번 계산 (원래 split 기준)
     val_pred = reg.predict(X_val)
-
     mae_val = mean_absolute_error(y_val, val_pred)
     rmse_val = np.sqrt(mean_squared_error(y_val, val_pred))
     smape_val = smape(y_val.values, val_pred)
 
-    print("\n===== Validation Performance (with Lags & Rolling) =====")
+    print("\n===== Validation Performance (best tuned model) =====")
     print(f"MAE   : {mae_val:,.2f}")
     print(f"RMSE  : {rmse_val:,.2f}")
     print(f"SMAPE : {smape_val:.2f}%")
@@ -188,7 +237,7 @@ def main():
     rmse_test = np.sqrt(mean_squared_error(y_test, test_pred))
     smape_test = smape(y_test, test_pred)
 
-    print("\n===== Test Performance (daily>0 only, with Lags & Rolling) =====")
+    print("\n===== Test Performance (daily>0 only, tuned LightGBM) =====")
     print(f"MAE   : {mae_test:,.2f}")
     print(f"RMSE  : {rmse_test:,.2f}")
     print(f"SMAPE : {smape_test:.2f}%")

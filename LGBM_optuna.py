@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 import lightgbm as lgb
+import optuna
+
 
 # =========================
 # 1. 유틸 함수들
@@ -54,6 +56,7 @@ def main():
     TEST = "Data/POS_test.csv"
 
     # ---------- (1) 데이터 로드 ----------
+    print("Loading data...")
     feat = pd.read_excel(FEATURE)
     pos_train = pd.read_csv(TRAIN)
     pos_test = pd.read_csv(TEST)
@@ -81,12 +84,18 @@ def main():
     print(df_all.head())
 
     # ---------- (2) Feature Engineering ----------
+    print("\nFeature engineering...")
+
     # 2-1. 운영시간
     df_all["operating_hours"] = df_all.apply(calculate_operating_hours, axis=1)
 
-    # 2-2. 시험 window (optional)
-    df_all["exam_before3"] = df_all["exam"].shift(1).rolling(3, min_periods=1).sum().fillna(0)
-    df_all["exam_after3"] = df_all["exam"].shift(-1).rolling(3, min_periods=1).sum().fillna(0)
+    # 2-2. 시험 window (전후 3일 누적)
+    df_all["exam_before3"] = (
+        df_all["exam"].shift(1).rolling(3, min_periods=1).sum().fillna(0)
+    )
+    df_all["exam_after3"] = (
+        df_all["exam"].shift(-1).rolling(3, min_periods=1).sum().fillna(0)
+    )
 
     # 2-3. 학기 × 주말 교차
     df_all["semester_weekend"] = df_all["semester"] * df_all["weekend"]
@@ -100,7 +109,6 @@ def main():
     win_list = [7, 14, 28]
     for win in win_list:
         roll = df_all["daily"].rolling(window=win, min_periods=1)
-        # 현재 날 정보는 쓰지 않도록 shift(1)
         df_all[f"RollingMean{win}"] = roll.mean().shift(1)
         df_all[f"RollingStd{win}"] = roll.std(ddof=0).shift(1)
 
@@ -111,7 +119,6 @@ def main():
     print(df_all.head())
 
     # ---------- (3) Train / Test 분리 ----------
-    # NaN 있는 행 제거 (Lag/Rolling 때문에 앞부분이 NaN)
     feature_na_cols = [f"Lag{l}" for l in lag_list] + \
                       [f"RollingMean{w}" for w in win_list] + \
                       [f"RollingStd{w}" for w in win_list]
@@ -141,40 +148,74 @@ def main():
     X_val = val[feature_cols]
     y_val = val["daily"]
 
-    print("\nFeature columns:", len(feature_cols))
+    print("\n# of features:", len(feature_cols))
     print(feature_cols)
 
-    # ---------- (5) LightGBM 학습 ----------
-    reg = lgb.LGBMRegressor(
-        objective="regression",
-        learning_rate=0.05,
-        n_estimators=800,
-        num_leaves=31,
-        subsample=0.8,
-        colsample_bytree=0.9,
-        min_child_samples=30,
-        random_state=42
-    )
+    # ---------- (5) Optuna Objective 정의 ----------
+    def objective(trial: optuna.trial.Trial) -> float:
+        # 하이퍼파라미터 후보 탐색 범위 설정
+        params = {
+            "objective": "regression",
+            "random_state": 42,
+            "num_leaves": trial.suggest_int("num_leaves", 15, 127),
+            "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.2, log=True),
+            "n_estimators": trial.suggest_int("n_estimators", 200, 1200),
+            "min_child_samples": trial.suggest_int("min_child_samples", 10, 80),
+            "subsample": trial.suggest_float("subsample", 0.6, 1.0),
+            "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0),
+            "reg_lambda": trial.suggest_float("reg_lambda", 1e-3, 10.0, log=True),
+            "reg_alpha": trial.suggest_float("reg_alpha", 1e-3, 10.0, log=True),
+        }
 
-    reg.fit(X_train, y_train)
+        model = lgb.LGBMRegressor(**params)
 
-    # ---------- (6) Validation 평가 ----------
-    val_pred = reg.predict(X_val)
+        model.fit(
+            X_train,
+            y_train,
+        )
 
+        val_pred = model.predict(X_val)
+        rmse = np.sqrt(mean_squared_error(y_val, val_pred))
+
+        return rmse  # Optuna가 최소화할 값
+
+    # ---------- (6) Optuna로 튜닝 ----------
+    print("\nRunning Optuna optimization...")
+    study = optuna.create_study(direction="minimize")
+    # n_trials을 늘리면 더 많이 탐색하지만 시간이 오래 걸림 (예: 50~100)
+    study.optimize(objective, n_trials=50, show_progress_bar=True)
+
+    print("\n=== Optuna best trial ===")
+    print("Best RMSE:", study.best_value)
+    print("Best params:", study.best_params)
+
+    best_params = study.best_params
+    best_params["objective"] = "regression"
+    best_params["random_state"] = 42
+
+    # ---------- (7) Best 파라미터로 Train+Val 전체 재학습 ----------
+    X_train_full = df_sorted[feature_cols]
+    y_train_full = df_sorted["daily"]
+
+    best_model = lgb.LGBMRegressor(**best_params)
+    best_model.fit(X_train_full, y_train_full)
+
+    # 참고용: 같은 Val 구간에 대해 성능 다시 측정
+    val_pred = best_model.predict(X_val)
     mae_val = mean_absolute_error(y_val, val_pred)
     rmse_val = np.sqrt(mean_squared_error(y_val, val_pred))
     smape_val = smape(y_val.values, val_pred)
 
-    print("\n===== Validation Performance (with Lags & Rolling) =====")
+    print("\n===== Validation Performance (Optuna-tuned LightGBM) =====")
     print(f"MAE   : {mae_val:,.2f}")
     print(f"RMSE  : {rmse_val:,.2f}")
     print(f"SMAPE : {smape_val:.2f}%")
 
     print("\nFeature Importances (Top 30):")
-    fi = pd.Series(reg.feature_importances_, index=feature_cols).sort_values(ascending=False)
+    fi = pd.Series(best_model.feature_importances_, index=feature_cols).sort_values(ascending=False)
     print(fi.head(30))
 
-    # ---------- (7) Test 평가 (daily>0만) ----------
+    # ---------- (8) Test 평가 (daily>0만) ----------
     df_test_eval = df_test[df_test["daily"] > 0].copy()
     if len(df_test_eval) == 0:
         print("\nNo test rows with daily>0 after lag/rolling/NaN filtering.")
@@ -182,13 +223,13 @@ def main():
 
     X_test = df_test_eval[feature_cols]
     y_test = df_test_eval["daily"].values
-    test_pred = reg.predict(X_test)
+    test_pred = best_model.predict(X_test)
 
     mae_test = mean_absolute_error(y_test, test_pred)
     rmse_test = np.sqrt(mean_squared_error(y_test, test_pred))
     smape_test = smape(y_test, test_pred)
 
-    print("\n===== Test Performance (daily>0 only, with Lags & Rolling) =====")
+    print("\n===== Test Performance (daily>0 only, Optuna-tuned LightGBM) =====")
     print(f"MAE   : {mae_test:,.2f}")
     print(f"RMSE  : {rmse_test:,.2f}")
     print(f"SMAPE : {smape_test:.2f}%")
