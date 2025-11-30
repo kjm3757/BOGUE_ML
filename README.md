@@ -149,5 +149,3 @@ python XGB.py
 **Team BOGUE**
 
 * 강민서 김정민 성세은
-
-rollback,,,
