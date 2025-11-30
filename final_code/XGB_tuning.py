@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from sklearn.metrics import mean_absolute_error, mean_squared_error
-import lightgbm as lgb
+import xgboost as xgb  # ✅ LightGBM 대신 XGBoost 사용
 
 # =========================
 # 1. 유틸 함수들
@@ -49,9 +49,9 @@ def calculate_operating_hours(row):
 # 2. 메인 파이프라인
 # =========================
 def main():
-    FEATURE = "Data/Feature.xlsx"
-    TRAIN = "Data/POS_train_val.csv"
-    TEST = "Data/POS_test.csv"
+    FEATURE = "../Data/Feature.xlsx"
+    TRAIN = "../Data/POS_train_val.csv"
+    TEST = "../Data/POS_test.csv"
 
     # ---------- (1) 데이터 로드 ----------
     feat = pd.read_excel(FEATURE)
@@ -137,57 +137,58 @@ def main():
     feature_cols = [c for c in df_sorted.columns if c not in drop_cols]
 
     X_train = train[feature_cols]
-    y_train = train["daily"]
+    y_train = train["daily"].values
     X_val = val[feature_cols]
-    y_val = val["daily"]
+    y_val = val["daily"].values
 
     print("\nFeature columns:", len(feature_cols))
     print(feature_cols)
 
-    # ---------- (5) Hyperparameter Tuning (LightGBM) ----------
+    # ---------- (5) XGBoost Grid Search (Val RMSE 기준) ----------
     from itertools import product
 
     # 튜닝할 하이퍼파라미터 후보들
     param_grid = {
-        "num_leaves":       [15, 31, 63],   # 리프 개수(복잡도)
-        "learning_rate":    [0.03, 0.05],   # 학습률 (작을수록 느리지만 안정적)
-        "n_estimators":     [400, 800],     # 트리 개수
-        "min_child_samples":[20, 40],       # 리프에 들어갈 최소 데이터 수
-        "subsample":        [0.7, 0.9],     # row sampling 비율
-        "colsample_bytree": [0.7, 0.9],     # column sampling 비율
+        "max_depth":        [4, 5, 6],     # 트리 깊이
+        "learning_rate":    [0.03, 0.05],  # 학습률 (작을수록 느리지만 안정적)
+        "n_estimators":     [400, 800],    # 트리 개수
+        "min_child_weight": [2, 4],        # 리프 분기 제한
+        "subsample":        [0.7, 0.9],    # row sampling 비율
+        "colsample_bytree": [0.7, 0.9],    # column sampling 비율
     }
 
     best_rmse = np.inf
     best_params = None
 
-    print("\n===== Hyperparameter Search (based on Val RMSE) =====")
-    # 모든 조합을 하나씩 돌면서 RMSE 제일 작은 조합 찾기
-    for num_leaves, lr, n_estimators, min_child, subsample, colsample in product(
-        param_grid["num_leaves"],
+    print("\n===== Hyperparameter Search (based on Val RMSE, XGBoost) =====")
+
+    for max_depth, lr, n_estimators, min_child_weight, subsample, colsample in product(
+        param_grid["max_depth"],
         param_grid["learning_rate"],
         param_grid["n_estimators"],
-        param_grid["min_child_samples"],
+        param_grid["min_child_weight"],
         param_grid["subsample"],
         param_grid["colsample_bytree"],
     ):
         params = {
-            "num_leaves": num_leaves,
+            "objective": "reg:squarederror",
+            "max_depth": max_depth,
             "learning_rate": lr,
             "n_estimators": n_estimators,
-            "min_child_samples": min_child,
+            "min_child_weight": min_child_weight,
             "subsample": subsample,
             "colsample_bytree": colsample,
+            "random_state": 42,
+            "n_jobs": -1,
         }
 
-        reg_tmp = lgb.LGBMRegressor(
-            objective="regression",
-            random_state=42,
-            **params,
-        )
+        reg_tmp = xgb.XGBRegressor(**params)
 
         reg_tmp.fit(X_train, y_train)
         val_pred_tmp = reg_tmp.predict(X_val)
         rmse_tmp = np.sqrt(mean_squared_error(y_val, val_pred_tmp))
+
+        print(f"params={params} → RMSE={rmse_tmp:.4f}")
 
         if rmse_tmp < best_rmse:
             best_rmse = rmse_tmp
@@ -195,26 +196,20 @@ def main():
 
     print("\n>>> Best Params (by Val RMSE):")
     print(best_params)
-    print(f">>> Best Val RMSE: {best_rmse:,.2f}")
+    print(f">>> Best Val RMSE: {best_rmse:,.4f}")
 
-    # ---------- (6) Best 모델을 Train+Val 전체로 재학습 ----------
-    X_train_full = df_sorted[feature_cols]
-    y_train_full = df_sorted["daily"]
+    # 🔹 최적 파라미터로 최종 모델 다시 학습
+    reg = xgb.XGBRegressor(**best_params)
+    reg.fit(X_train, y_train)
 
-    reg = lgb.LGBMRegressor(
-        objective="regression",
-        random_state=42,
-        **best_params,
-    )
-    reg.fit(X_train_full, y_train_full)
-
-    # 참고용으로 다시 Val 성능도 한 번 계산 (원래 split 기준)
+    # ---------- (6) Validation 평가 ----------
     val_pred = reg.predict(X_val)
+
     mae_val = mean_absolute_error(y_val, val_pred)
     rmse_val = np.sqrt(mean_squared_error(y_val, val_pred))
-    smape_val = smape(y_val.values, val_pred)
+    smape_val = smape(y_val, val_pred)
 
-    print("\n===== Validation Performance (best tuned model) =====")
+    print("\n===== Validation Performance (with Lags & Rolling, tuned XGBoost) =====")
     print(f"MAE   : {mae_val:,.2f}")
     print(f"RMSE  : {rmse_val:,.2f}")
     print(f"SMAPE : {smape_val:.2f}%")
@@ -237,7 +232,7 @@ def main():
     rmse_test = np.sqrt(mean_squared_error(y_test, test_pred))
     smape_test = smape(y_test, test_pred)
 
-    print("\n===== Test Performance (daily>0 only, tuned LightGBM) =====")
+    print("\n===== Test Performance (daily>0 only, tuned XGBoost) =====")
     print(f"MAE   : {mae_test:,.2f}")
     print(f"RMSE  : {rmse_test:,.2f}")
     print(f"SMAPE : {smape_test:.2f}%")

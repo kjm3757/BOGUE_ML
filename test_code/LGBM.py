@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from sklearn.metrics import mean_absolute_error, mean_squared_error
-import xgboost as xgb  # ✅ LightGBM 대신 XGBoost 사용
+import lightgbm as lgb
 
 # =========================
 # 1. 유틸 함수들
@@ -49,9 +49,9 @@ def calculate_operating_hours(row):
 # 2. 메인 파이프라인
 # =========================
 def main():
-    FEATURE = "Data/Feature.xlsx"
-    TRAIN = "Data/POS_train_val.csv"
-    TEST = "Data/POS_test.csv"
+    FEATURE = "../Data/Feature.xlsx"
+    TRAIN = "../Data/POS_train_val.csv"
+    TEST = "../Data/POS_test.csv"
 
     # ---------- (1) 데이터 로드 ----------
     feat = pd.read_excel(FEATURE)
@@ -137,69 +137,25 @@ def main():
     feature_cols = [c for c in df_sorted.columns if c not in drop_cols]
 
     X_train = train[feature_cols]
-    y_train = train["daily"].values
+    y_train = train["daily"]
     X_val = val[feature_cols]
-    y_val = val["daily"].values
+    y_val = val["daily"]
 
     print("\nFeature columns:", len(feature_cols))
     print(feature_cols)
 
-    # ---------- (5) XGBoost Grid Search (Val RMSE 기준) ----------
-    from itertools import product
+    # ---------- (5) LightGBM 학습 ----------
+    reg = lgb.LGBMRegressor(
+        objective="regression",
+        learning_rate=0.05,
+        n_estimators=800,
+        num_leaves=31,
+        subsample=0.8,
+        colsample_bytree=0.9,
+        min_child_samples=30,
+        random_state=42
+    )
 
-    # 튜닝할 하이퍼파라미터 후보들
-    param_grid = {
-        "max_depth":        [4, 5, 6],     # 트리 깊이
-        "learning_rate":    [0.03, 0.05],  # 학습률 (작을수록 느리지만 안정적)
-        "n_estimators":     [400, 800],    # 트리 개수
-        "min_child_weight": [2, 4],        # 리프 분기 제한
-        "subsample":        [0.7, 0.9],    # row sampling 비율
-        "colsample_bytree": [0.7, 0.9],    # column sampling 비율
-    }
-
-    best_rmse = np.inf
-    best_params = None
-
-    print("\n===== Hyperparameter Search (based on Val RMSE, XGBoost) =====")
-
-    for max_depth, lr, n_estimators, min_child_weight, subsample, colsample in product(
-        param_grid["max_depth"],
-        param_grid["learning_rate"],
-        param_grid["n_estimators"],
-        param_grid["min_child_weight"],
-        param_grid["subsample"],
-        param_grid["colsample_bytree"],
-    ):
-        params = {
-            "objective": "reg:squarederror",
-            "max_depth": max_depth,
-            "learning_rate": lr,
-            "n_estimators": n_estimators,
-            "min_child_weight": min_child_weight,
-            "subsample": subsample,
-            "colsample_bytree": colsample,
-            "random_state": 42,
-            "n_jobs": -1,
-        }
-
-        reg_tmp = xgb.XGBRegressor(**params)
-
-        reg_tmp.fit(X_train, y_train)
-        val_pred_tmp = reg_tmp.predict(X_val)
-        rmse_tmp = np.sqrt(mean_squared_error(y_val, val_pred_tmp))
-
-        print(f"params={params} → RMSE={rmse_tmp:.4f}")
-
-        if rmse_tmp < best_rmse:
-            best_rmse = rmse_tmp
-            best_params = params
-
-    print("\n>>> Best Params (by Val RMSE):")
-    print(best_params)
-    print(f">>> Best Val RMSE: {best_rmse:,.4f}")
-
-    # 🔹 최적 파라미터로 최종 모델 다시 학습
-    reg = xgb.XGBRegressor(**best_params)
     reg.fit(X_train, y_train)
 
     # ---------- (6) Validation 평가 ----------
@@ -207,9 +163,9 @@ def main():
 
     mae_val = mean_absolute_error(y_val, val_pred)
     rmse_val = np.sqrt(mean_squared_error(y_val, val_pred))
-    smape_val = smape(y_val, val_pred)
+    smape_val = smape(y_val.values, val_pred)
 
-    print("\n===== Validation Performance (with Lags & Rolling, tuned XGBoost) =====")
+    print("\n===== Validation Performance (with Lags & Rolling) =====")
     print(f"MAE   : {mae_val:,.2f}")
     print(f"RMSE  : {rmse_val:,.2f}")
     print(f"SMAPE : {smape_val:.2f}%")
@@ -232,7 +188,7 @@ def main():
     rmse_test = np.sqrt(mean_squared_error(y_test, test_pred))
     smape_test = smape(y_test, test_pred)
 
-    print("\n===== Test Performance (daily>0 only, tuned XGBoost) =====")
+    print("\n===== Test Performance (daily>0 only, with Lags & Rolling) =====")
     print(f"MAE   : {mae_test:,.2f}")
     print(f"RMSE  : {rmse_test:,.2f}")
     print(f"SMAPE : {smape_test:.2f}%")

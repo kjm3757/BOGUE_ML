@@ -51,9 +51,9 @@ def calculate_operating_hours(row):
 # 2. 메인 파이프라인
 # =========================
 def main():
-    FEATURE = "Data/Feature.xlsx"
-    TRAIN = "Data/POS_train_val.csv"
-    TEST = "Data/POS_test.csv"
+    FEATURE = "../Data/Feature.xlsx"
+    TRAIN = "../Data/POS_train_val.csv"
+    TEST = "../Data/POS_test.csv"
 
     # ---------- (1) 데이터 로드 ----------
     print("Loading data...")
