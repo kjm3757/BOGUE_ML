@@ -1,85 +1,99 @@
-import numpy as np
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.linear_model import LinearRegression
 
-# ensemble_models에서 앙상블용 데이터/함수 가져오기
-from ensemble_models import build_blend_model, smape
+# 🔽 로컬에서 각 모델 실행 함수 import
+from XGB_tuning import run_xgb
+from LGBM_tuning import run_lgbm
+from LSTM_final import run_lstm
+from GRU_final import run_gru
 
 
-def main():
-    # 1) ensemble_models에서 base_df, blend_model 가져오기
-    #    (여기서 XGB/LGBM/LSTM/GRU + Blend 예측까지 다 계산됨)
-    base_df, blend_model = build_blend_model()
+# ==========================================================
+# 🔧 공통 함수: SMAPE
+# ==========================================================
+def smape(y_true, y_pred):
+    y_true = np.asarray(y_true, float)
+    y_pred = np.asarray(y_pred, float)
+    # (|y_true| + |y_pred|) / 2  형태로 괄호만 살짝 수정
+    denom = (np.abs(y_true) + np.abs(y_pred)) / 2
+    denom[denom == 0] = 1e-8
+    return np.mean(np.abs(y_true - y_pred) / denom) * 100
 
-    # 2) 기본 4모델 + 앙상블 예측 벡터 정리
-    y_true = base_df["actual_daily"].values
 
-    preds_dict = {
-        "XGB":      base_df["pred_xgb"].values,
-        "LGBM":     base_df["pred_lgbm"].values,
-        "LSTM":     base_df["pred_lstm"].values,
-        "GRU_ens":  base_df["pred_gru"].values,
-        "Blend":    base_df["pred_blend"].values,
-    }
+# ==========================================================
+# 🧠 전체 파이프라인 (4모델 실행 + 블렌딩)
+# ==========================================================
+def build_blend_model():
+    # 1️⃣ 4개 모델 실행
+    xgb_metrics, xgb_df = run_xgb()
+    lgbm_metrics, lgbm_df = run_lgbm()
+    lstm_metrics, lstm_df = run_lstm()
+    gru_metrics, gru_df = run_gru()
 
-    # 3) 모델별 MAE / RMSE / SMAPE 계산
-    rows = []
-    for name, pred in preds_dict.items():
-        mae = mean_absolute_error(y_true, pred)
-        rmse = np.sqrt(mean_squared_error(y_true, pred))
-        s = smape(y_true, pred)
-        rows.append({"model": name, "MAE": mae, "RMSE": rmse, "SMAPE": s})
+    # 2️⃣ 컬럼 이름 통일
+    xgb_df  = xgb_df.rename(columns={"pred_daily": "pred_xgb"})
+    lgbm_df = lgbm_df.rename(columns={"pred_daily": "pred_lgbm"})
+    lstm_df = lstm_df.rename(columns={"pred_daily": "pred_lstm"})
+    gru_df  = gru_df.rename(columns={
+        "daily_actual": "actual_daily",
+        "예측매출": "pred_gru"
+    })
 
-    metrics_df = pd.DataFrame(rows)
+    # 3️⃣ 공통 날짜 기준 inner join → 베이스 DataFrame 생성
+    base = xgb_df[["date", "actual_daily", "pred_xgb"]].copy()
+    base = base.merge(lgbm_df[["date", "pred_lgbm"]], on="date", how="inner")
+    base = base.merge(lstm_df[["date", "pred_lstm"]], on="date", how="inner")
+    base = base.merge(gru_df[["date", "pred_gru"]], on="date", how="inner")
+    base = base.sort_values("date").reset_index(drop=True)
 
-    print("\n===== 기본 4모델 + 앙상블 성능 비교 =====")
-    print(metrics_df.to_string(index=False))
+    print("\n===== 앙상블에 사용할 공통 구간 데이터 (샘플) =====")
+    print(base.head())
 
-    # 4) 바 차트로 성능 비교 (MAE / RMSE / SMAPE)
-    models = metrics_df["model"].tolist()
-    mae_vals = metrics_df["MAE"].tolist()
-    rmse_vals = metrics_df["RMSE"].tolist()
-    smape_vals = metrics_df["SMAPE"].tolist()
+    # 4️⃣ Linear Regression Blending 학습
+    y_true = base["actual_daily"].values
+    pred_matrix = base[["pred_xgb", "pred_lgbm", "pred_lstm", "pred_gru"]].values
 
-    fig, axes = plt.subplots(1, 3, figsize=(18, 4))
-    fig.suptitle("Base Models vs Ensemble Performance", fontsize=14)
+    blender = LinearRegression()
+    blender.fit(pred_matrix, y_true)
+    pred_blend = blender.predict(pred_matrix)
 
-    axes[0].bar(models, mae_vals)
-    axes[0].set_title("MAE")
-    axes[0].set_ylabel("MAE")
-    axes[0].tick_params(axis="x", rotation=45)
+    base["pred_blend"] = pred_blend
 
-    axes[1].bar(models, rmse_vals)
-    axes[1].set_title("RMSE")
-    axes[1].tick_params(axis="x", rotation=45)
+    # 5️⃣ 앙상블 성능 출력
+    b_mae = mean_absolute_error(y_true, pred_blend)
+    b_rmse = np.sqrt(mean_squared_error(y_true, pred_blend))
+    b_smape = smape(y_true, pred_blend)
 
-    axes[2].bar(models, smape_vals)
-    axes[2].set_title("SMAPE (%)")
-    axes[2].tick_params(axis="x", rotation=45)
+    print("\n===== [Linear Regression Blending] 최종 앙상블 성능 =====")
+    print(f"MAE:   {b_mae:,.2f}")
+    print(f"RMSE:  {b_rmse:,.2f}")
+    print(f"SMAPE: {b_smape:.2f}%")
 
-    plt.tight_layout()
-    plt.show()
-
-    # 5) 타임시리즈: 실제 vs 4모델 + 앙상블 예측
+    # 6️⃣ Actual vs Ensemble Plot
     plt.figure(figsize=(18, 6))
-    plt.plot(base_df["date"], base_df["actual_daily"],
-             label="Actual", linewidth=2, color="black")
-
-    plt.plot(base_df["date"], base_df["pred_xgb"],   label="XGB",      linestyle="--")
-    plt.plot(base_df["date"], base_df["pred_lgbm"],  label="LGBM",     linestyle="--")
-    plt.plot(base_df["date"], base_df["pred_lstm"],  label="LSTM",     linestyle="--")
-    plt.plot(base_df["date"], base_df["pred_gru"],   label="GRU_ens",  linestyle="--")
-    plt.plot(base_df["date"], base_df["pred_blend"], label="Blend",    linewidth=2)
-
-    plt.title("Actual vs Base Models + Ensemble Predictions")
+    plt.plot(base["date"], base["actual_daily"], label="Actual", linewidth=2)
+    plt.plot(base["date"], base["pred_blend"], label="Blend (Ensemble)", linestyle="--")
+    plt.title("Actual vs Blended Ensemble Prediction")
     plt.xlabel("Date")
     plt.ylabel("Daily Sales")
     plt.legend()
-    plt.xticks(rotation=45, ha="right")
+    plt.xticks(rotation=45)
     plt.tight_layout()
     plt.show()
 
+    return base, blender
 
+
+# ==========================================================
+# 🚀 실행
+# ==========================================================
 if __name__ == "__main__":
-    main()
+    base_df, blend_model = build_blend_model()
+
+    print("\n===== Blending 모델 가중치 (Feature Importances) =====")
+    for name, w in zip(["XGB", "LGBM", "LSTM", "GRU"], blend_model.coef_):
+        print(f"{name:5s} : {w:.6f}")
+    print(f"Intercept : {blend_model.intercept_:.6f}")
