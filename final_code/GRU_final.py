@@ -322,6 +322,8 @@ if not comparison_df.empty:
     print("=" * 40)
     
     # result 폴더 경로 (final_code 기준 한 단계 위로 올라가서 result 폴더)
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
     result_dir = os.path.abspath(os.path.join(BASE_DIR, "..", "result"))
     os.makedirs(result_dir, exist_ok=True)
 
