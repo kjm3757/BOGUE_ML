@@ -202,6 +202,11 @@ def main():
     reg = xgb.XGBRegressor(**best_params)
     reg.fit(X_train, y_train)
 
+    # ✅ 추가: 최종 모델 하이퍼파라미터 출력
+    print("\n===== Final Model Hyperparameters (Used for Training) =====")
+    for k, v in reg.get_params().items():
+        print(f"{k}: {v}")
+
     # ---------- (6) Validation 평가 ----------
     val_pred = reg.predict(X_val)
 

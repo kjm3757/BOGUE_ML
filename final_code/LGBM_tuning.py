@@ -208,6 +208,14 @@ def main():
     )
     reg.fit(X_train_full, y_train_full)
 
+    # ==========================================================
+    # ✅ 최종 LightGBM 모델의 하이퍼파라미터 출력
+    # ==========================================================
+    print("\n===== Final LightGBM Hyperparameters (Used for Training) =====")
+    for k, v in reg.get_params().items():
+        print(f"{k}: {v}")
+
+
     # 참고용으로 다시 Val 성능도 한 번 계산 (원래 split 기준)
     val_pred = reg.predict(X_val)
     mae_val = mean_absolute_error(y_val, val_pred)
