@@ -70,13 +70,25 @@ openpyxl
 ### ▶ LightGBM 모델 실행
 
 ```bash
-python LGBM.py
+python LGBM_tuning.py
 ```
 
 ### ▶ XGBoost 모델 실행
 
 ```bash
-python XGB.py
+python XGB_tuning.py
+```
+
+### ▶ GRU 모델 실행
+
+```bash
+python GRU_final.py
+```
+
+### ▶ LSTM 모델 실행
+
+```bash
+python LSTM_final.py
 ```
 
 ---
@@ -122,6 +134,16 @@ python XGB.py
 * `XGBRegressor`
 * 강력한 성능의 boosting 모델
 * 자동 overfitting 방지 기능 포함
+
+### 🔹 GRU
+* GRU (Gated Recurrent Unit)
+* 가벼운 구조의 시계열 딥러닝 모델
+* 적은 파라미터로 빠르게 학습하고 장기 의존성도 처리 가능
+
+### 🔹 LSTM
+* LSTM (Long Short-Term Memory)
+* 복잡한 패턴을 잘 잡아내는 고성능 시계열 딥러닝 모델
+* 장기 의존성 문제를 효과적으로 해결해 안정적인 예측 가능
 
 ---
 
