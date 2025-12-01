@@ -17,10 +17,18 @@ BOGUE_ML/
 │   ├─ Feature.xlsx
 │   ├─ POS_train_val.csv
 │   └─ POS_test.csv
-├─ LGBM.py
-├─ XGB.py
-├─ requirements.txt
-└─ README.md
+├─ description/
+├─ final_code/
+│   ├─ LGBM_tuning.py
+│   ├─ XGB_tuning.py
+│   └─ GRU_final.py
+│   └─ LSTM_final.py
+├─ ipynb/
+├─ result/
+├─ test_code/
+├─ LICENSE
+├─README.md
+└─ requirements.txt
 
 ````
 
