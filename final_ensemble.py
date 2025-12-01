@@ -22,7 +22,6 @@ SEED = 42
 np.random.seed(SEED)
 random.seed(SEED)
 
-
 FEATURE_PATH = "/content/drive/MyDrive/기계학습/팀플/Data/학사일정_정리(2325).csv"
 TRAIN_PATH   = "/content/drive/MyDrive/기계학습/팀플/Data/ENG_POS_train_val.csv"
 TEST_PATH = "/content/drive/MyDrive/기계학습/팀플/Data/ENG_POS_test.csv"
@@ -91,53 +90,53 @@ def run_lgbm(feature_path=FEATURE_PATH, train_path=TRAIN_PATH, test_path=TEST_PA
     pos_train["set"] = "train"
     pos_test["set"] = "test"
 
+    # 전체 병합 (Static Feature 계산용)
     pos_all = pd.concat([pos_train, pos_test], ignore_index=True)
     df_all = pd.merge(pos_all, feat, on="date", how="left")
     df_all = df_all.sort_values("date").reset_index(drop=True)
 
     print("All merged shape:", df_all.shape)
-    print(df_all.head())
 
-    # ---------- (2) Feature Engineering ----------
+    # ---------- (2) Static Feature Engineering ----------
     df_all["operating_hours"] = df_all.apply(calculate_operating_hours, axis=1)
+
+    # [New Feature] Month (계절성 반영)
+    df_all["month"] = df_all["date"].dt.month
 
     df_all["exam_before3"] = df_all["exam"].shift(1).rolling(3, min_periods=1).sum().fillna(0)
     df_all["exam_after3"] = df_all["exam"].shift(-1).rolling(3, min_periods=1).sum().fillna(0)
 
     df_all["semester_weekend"] = df_all["semester"] * df_all["weekend"]
 
-    # Lag features
-    lag_list = [1, 2, 3, 7, 14, 28]
-    for lag in lag_list:
-        df_all[f"Lag{lag}"] = df_all["daily"].shift(lag)
-
-    # Rolling features
-    win_list = [7, 14, 28]
-    for win in win_list:
-        roll = df_all["daily"].rolling(window=win, min_periods=1)
-        df_all[f"RollingMean{win}"] = roll.mean().shift(1)
-        df_all[f"RollingStd{win}"] = roll.std(ddof=0).shift(1)
-
     df_all = pd.get_dummies(df_all, columns=["weekday"], drop_first=True)
 
     # ---------- (3) Train/Test 분리 ----------
+    df_train_val = df_all[df_all["set"] == "train"].copy()
+    df_test_static = df_all[df_all["set"] == "test"].copy()
+
+    print("\nGenerating features for Training set...")
+    lag_list = [1, 2, 3, 7, 14, 28]
+    win_list = [7, 14, 28]
+
+    for lag in lag_list:
+        df_train_val[f"Lag{lag}"] = df_train_val["daily"].shift(lag)
+
+    for win in win_list:
+        roll = df_train_val["daily"].rolling(window=win, min_periods=1)
+        df_train_val[f"RollingMean{win}"] = roll.mean().shift(1)
+        df_train_val[f"RollingStd{win}"] = roll.std(ddof=0).shift(1)
+
     feature_na_cols = [f"Lag{l}" for l in lag_list] + \
                       [f"RollingMean{w}" for w in win_list] + \
                       [f"RollingStd{w}" for w in win_list]
 
-    df_all_clean = df_all.dropna(subset=feature_na_cols).reset_index(drop=True)
-    print("\nAfter dropping NaN:", df_all_clean.shape)
+    df_train_val_clean = df_train_val.dropna(subset=feature_na_cols).reset_index(drop=True)
+    df_train_val_clean = df_train_val_clean[df_train_val_clean["daily"] > 0].copy()
 
-    df_train_val = df_all_clean[df_all_clean["set"] == "train"].copy()
-    df_test = df_all_clean[df_all_clean["set"] == "test"].copy()
+    print("Train_val prepared:", df_train_val_clean.shape)
 
-    df_train_val = df_train_val[df_train_val["daily"] > 0].copy()
-
-    print("Train_val:", df_train_val.shape)
-    print("Test:", df_test.shape)
-
-    # ---------- (4) Train/Val Split ----------
-    df_sorted = df_train_val.sort_values("date").reset_index(drop=True)
+    # ---------- (4) Train/Val Split & Model Training (Log Transform) ----------
+    df_sorted = df_train_val_clean.sort_values("date").reset_index(drop=True)
     split_idx = int(len(df_sorted) * 0.8)
 
     train = df_sorted.iloc[:split_idx]
@@ -147,58 +146,36 @@ def run_lgbm(feature_path=FEATURE_PATH, train_path=TRAIN_PATH, test_path=TEST_PA
     feature_cols = [c for c in df_sorted.columns if c not in drop_cols]
 
     X_train = train[feature_cols]
-    y_train = train["daily"]
+    y_train = np.log1p(train["daily"]) # Log Transform
     X_val = val[feature_cols]
-    y_val = val["daily"]
+    y_val = np.log1p(val["daily"])     # Log Transform
 
-    print("\nFeature columns:", len(feature_cols))
-    print(feature_cols)
+    print(f"Training with {len(feature_cols)} features (Target Log-Transformed)...")
 
-    # ---------- (5) Hyperparameter Tuning ----------
     from itertools import product
-
     param_grid = {
-        "num_leaves":       [15, 31, 63],
+        "num_leaves":       [15, 31],
         "learning_rate":    [0.03, 0.05],
         "n_estimators":     [400, 800],
-        "min_child_samples":[20, 40],
-        "subsample":        [0.7, 0.9],
-        "colsample_bytree": [0.7, 0.9],
+        "min_child_samples":[20],
+        "subsample":        [0.8],
+        "colsample_bytree": [0.8],
     }
 
     best_rmse = np.inf
     best_params = None
 
-    print("\n===== Hyperparameter Search =====")
     for num_leaves, lr, n_estimators, min_child, subsample, colsample in product(
-        param_grid["num_leaves"],
-        param_grid["learning_rate"],
-        param_grid["n_estimators"],
-        param_grid["min_child_samples"],
-        param_grid["subsample"],
-        param_grid["colsample_bytree"],
+        param_grid["num_leaves"], param_grid["learning_rate"], param_grid["n_estimators"],
+        param_grid["min_child_samples"], param_grid["subsample"], param_grid["colsample_bytree"],
     ):
         params = {
-            "num_leaves": num_leaves,
-            "learning_rate": lr,
-            "n_estimators": n_estimators,
-            "min_child_samples": min_child,
-            "subsample": subsample,
-            "colsample_bytree": colsample,
+            "num_leaves": num_leaves, "learning_rate": lr, "n_estimators": n_estimators,
+            "min_child_samples": min_child, "subsample": subsample, "colsample_bytree": colsample,
         }
-
         reg_tmp = lgb.LGBMRegressor(
-            objective="regression",
-            random_state=SEED,
-            bagging_seed=SEED,
-            feature_fraction_seed=SEED,
-            drop_seed=SEED,
-            data_random_seed=SEED,
-            extra_trees=False,
-            verbosity=-1,
-            **params,
+            objective="regression", random_state=SEED, verbosity=-1, **params
         )
-
         reg_tmp.fit(X_train, y_train)
         val_pred_tmp = reg_tmp.predict(X_val)
         rmse_tmp = np.sqrt(mean_squared_error(y_val, val_pred_tmp))
@@ -207,73 +184,76 @@ def run_lgbm(feature_path=FEATURE_PATH, train_path=TRAIN_PATH, test_path=TEST_PA
             best_rmse = rmse_tmp
             best_params = params
 
-    print("\n>>> Best Params:", best_params)
-    print(f">>> Best Val RMSE: {best_rmse:,.2f}")
+    print(f"Best Params: {best_params}")
 
-    # ---------- (6) 최종 모델 전체 학습 ----------
-    X_train_full = df_sorted[feature_cols]
-    y_train_full = df_sorted["daily"]
+    # Final Fit
+    reg = lgb.LGBMRegressor(objective="regression", random_state=SEED, verbosity=-1, **best_params)
+    reg.fit(df_sorted[feature_cols], np.log1p(df_sorted["daily"])) # Final Fit with Log
 
-    reg = lgb.LGBMRegressor(
-        objective="regression",
-        random_state=SEED,
-        bagging_seed=SEED,
-        feature_fraction_seed=SEED,
-        drop_seed=SEED,
-        data_random_seed=SEED,
-        extra_trees=False,
-        verbosity=-1,
-        **best_params,
-    )
-    reg.fit(X_train_full, y_train_full)
+    # ---------- (5) Recursive Forecasting for Test (Black Box Simulation) ----------
+    print("\nStarting Recursive Forecasting for Test Set...")
 
-    # 검증 성능 확인
-    val_pred = reg.predict(X_val)
-    mae_val = mean_absolute_error(y_val, val_pred)
-    rmse_val = np.sqrt(mean_squared_error(y_val, val_pred))
-    smape_val = smape(y_val.values, val_pred)
+    history_df = df_train_val.iloc[-60:].copy()
+    test_preds = []
 
-    print("\n===== Validation Performance =====")
-    print(f"MAE   : {mae_val:,.2f}")
-    print(f"RMSE  : {rmse_val:,.2f}")
-    print(f"SMAPE : {smape_val:.2f}%")
+    for idx, row in df_test_static.iterrows():
+        current_row = row.to_frame().T
+        current_row["daily"] = np.nan
 
-    print("\nFeature Importances (Top 30):")
-    fi = pd.Series(reg.feature_importances_, index=feature_cols).sort_values(ascending=False)
-    print(fi.head(30))
+        temp_history = pd.concat([history_df, current_row], ignore_index=True)
 
-    # ---------- (7) Test 평가 ----------
-    df_test_eval = df_test[df_test["daily"] > 0].copy()
-    if len(df_test_eval) == 0:
-        print("\nNo test rows with daily>0.")
-        return
+        for lag in lag_list:
+            temp_history[f"Lag{lag}"] = temp_history["daily"].shift(lag)
 
-    X_test = df_test_eval[feature_cols]
-    y_test = df_test_eval["daily"].values
-    test_pred = reg.predict(X_test)
+        for win in win_list:
+            roll = temp_history["daily"].rolling(window=win, min_periods=1)
+            temp_history[f"RollingMean{win}"] = roll.mean().shift(1)
+            temp_history[f"RollingStd{win}"] = roll.std(ddof=0).shift(1)
 
-    mae_test = mean_absolute_error(y_test, test_pred)
-    rmse_test = np.sqrt(mean_squared_error(y_test, test_pred))
-    smape_test = smape(y_test, test_pred)
+        X_test_single = temp_history.iloc[[-1]][feature_cols]
+        X_test_single = X_test_single.astype(float)
 
-    print("\n===== Test Performance =====")
+        # Predict Log Value
+        pred_log = reg.predict(X_test_single)[0]
+
+        # Inverse Transform (Exp)
+        pred = np.expm1(pred_log)
+
+        test_preds.append(pred)
+
+        current_row["daily"] = pred
+        history_df = pd.concat([history_df, current_row], ignore_index=True).iloc[-60:]
+
+    # ---------- (6) 성능 평가 ----------
+    # 실제값 가져오기 (평가용으로만 사용)
+    y_test_actual = df_test_static["daily"].values
+
+    # 0인 날짜 제외하고 평가 (기존 로직 따름)
+    # 단, 예측은 모든 날짜에 대해 수행했으므로 인덱싱으로 필터링
+    mask = y_test_actual > 0
+
+    final_actual = y_test_actual[mask]
+    final_pred = np.array(test_preds)[mask]
+
+    mae_test = mean_absolute_error(final_actual, final_pred)
+    rmse_test = np.sqrt(mean_squared_error(final_actual, final_pred))
+    smape_test = smape(final_actual, final_pred)
+
+    print("\n===== Test Performance (Recursive / Black-box) =====")
     print(f"MAE   : {mae_test:,.2f}")
     print(f"RMSE  : {rmse_test:,.2f}")
     print(f"SMAPE : {smape_test:.2f}%")
 
-    result_df = pd.DataFrame({
-        "date": df_test_eval["date"].values,
-        "actual_daily": y_test,
-        "pred_daily": test_pred
-    }).sort_values("date").reset_index(drop=True)
+    # 결과 저장
+    result_df = df_test_static.copy()
+    result_df["pred_daily"] = test_preds
+    result_df = result_df[result_df["daily"] > 0] # 평가 기준 동일하게 저장
 
-    result_df.to_csv("lgbm_prediction.csv", index=False, encoding="utf-8-sig")
+    result_df = result_df[["date", "daily", "pred_daily"]].rename(columns={"daily": "actual_daily"})
+    result_df.to_csv("lgbm_prediction_recursive.csv", index=False, encoding="utf-8-sig")
 
     metrics = {
-        "model": "LGBM",
-        "val_MAE": mae_val,
-        "val_RMSE": rmse_val,
-        "val_SMAPE": smape_val,
+        "model": "LGBM_Recursive",
         "test_MAE": mae_test,
         "test_RMSE": rmse_test,
         "test_SMAPE": smape_test,
@@ -281,18 +261,19 @@ def run_lgbm(feature_path=FEATURE_PATH, train_path=TRAIN_PATH, test_path=TEST_PA
 
     return metrics, result_df
 
-
-
 if __name__ == "__main__":
     metrics, df_pred = run_lgbm()
-    print("\n[DEBUG] LGBM metrics:", metrics)
+    print("\n[DEBUG] Metrics:", metrics)
     print(df_pred.head())
 
 import pandas as pd
 import numpy as np
 import random
+import warnings
+warnings.filterwarnings("ignore")
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 import xgboost as xgb
+
 # =========================
 # ⭐ 전역 시드 고정 (재현성 보장)
 # =========================
@@ -345,6 +326,7 @@ def calculate_operating_hours(row):
 # =========================
 def run_xgb(feature_path=FEATURE_PATH, train_path=TRAIN_PATH, test_path=TEST_PATH):
 
+    # ---------- (1) 데이터 로드 ----------
     feat = pd.read_csv(feature_path)
     pos_train = pd.read_csv(train_path)
     pos_test = pd.read_csv(test_path)
@@ -360,51 +342,56 @@ def run_xgb(feature_path=FEATURE_PATH, train_path=TRAIN_PATH, test_path=TEST_PAT
 
     pos_train["set"] = "train"
     pos_test["set"] = "test"
-    pos_all = pd.concat([pos_train, pos_test], ignore_index=True)
 
+    # 전체 병합 (Static Feature 계산용)
+    pos_all = pd.concat([pos_train, pos_test], ignore_index=True)
     df_all = pd.merge(pos_all, feat, on="date", how="left")
     df_all = df_all.sort_values("date").reset_index(drop=True)
 
     print("All merged shape:", df_all.shape)
-    print(df_all.head())
 
+    # ---------- (2) Static Feature Engineering ----------
     df_all["operating_hours"] = df_all.apply(calculate_operating_hours, axis=1)
+
+    # [New Feature] Month (계절성 반영)
+    df_all["month"] = df_all["date"].dt.month
 
     df_all["exam_before3"] = df_all["exam"].shift(1).rolling(3, min_periods=1).sum().fillna(0)
     df_all["exam_after3"] = df_all["exam"].shift(-1).rolling(3, min_periods=1).sum().fillna(0)
 
     df_all["semester_weekend"] = df_all["semester"] * df_all["weekend"]
 
-    lag_list = [1, 2, 3, 7, 14, 28]
-    for lag in lag_list:
-        df_all[f"Lag{lag}"] = df_all["daily"].shift(lag)
-
-    win_list = [7, 14, 28]
-    for win in win_list:
-        roll = df_all["daily"].rolling(window=win, min_periods=1)
-        df_all[f"RollingMean{win}"] = roll.mean().shift(1)
-        df_all[f"RollingStd{win}"] = roll.std(ddof=0).shift(1)
-
     df_all = pd.get_dummies(df_all, columns=["weekday"], drop_first=True)
 
-    print("\nAfter feature engineering:")
-    print(df_all.head())
+    # ---------- (3) Train/Test 분리 ----------
+    df_train_val = df_all[df_all["set"] == "train"].copy()
+    df_test_static = df_all[df_all["set"] == "test"].copy() # daily 값은 평가용으로만 씀
 
+    # [Train Phase] 학습 데이터에는 실제 daily 값을 이용하여 Lag 생성
+    print("\nGenerating features for Training set...")
+    lag_list = [1, 2, 3, 7, 14, 28]
+    win_list = [7, 14, 28]
+
+    for lag in lag_list:
+        df_train_val[f"Lag{lag}"] = df_train_val["daily"].shift(lag)
+
+    for win in win_list:
+        roll = df_train_val["daily"].rolling(window=win, min_periods=1)
+        df_train_val[f"RollingMean{win}"] = roll.mean().shift(1)
+        df_train_val[f"RollingStd{win}"] = roll.std(ddof=0).shift(1)
+
+    # NaN 제거
     feature_na_cols = [f"Lag{l}" for l in lag_list] + \
                       [f"RollingMean{w}" for w in win_list] + \
                       [f"RollingStd{w}" for w in win_list]
 
-    df_all_clean = df_all.dropna(subset=feature_na_cols).reset_index(drop=True)
-    print("\nAfter dropping NaN from lag/rolling:", df_all_clean.shape)
+    df_train_val_clean = df_train_val.dropna(subset=feature_na_cols).reset_index(drop=True)
+    df_train_val_clean = df_train_val_clean[df_train_val_clean["daily"] > 0].copy()
 
-    df_train_val = df_all_clean[df_all_clean["set"] == "train"].copy()
-    df_test = df_all_clean[df_all_clean["set"] == "test"].copy()
+    print("Train_val prepared:", df_train_val_clean.shape)
 
-    df_train_val = df_train_val[df_train_val["daily"] > 0].copy()
-    print("Train_val (daily>0):", df_train_val.shape)
-    print("Test (all, incl. 0 & >0):", df_test.shape)
-
-    df_sorted = df_train_val.sort_values("date").reset_index(drop=True)
+    # ---------- (4) Train/Val Split & Model Training (Log Transform) ----------
+    df_sorted = df_train_val_clean.sort_values("date").reset_index(drop=True)
     split_idx = int(len(df_sorted) * 0.8)
 
     train = df_sorted.iloc[:split_idx]
@@ -414,12 +401,11 @@ def run_xgb(feature_path=FEATURE_PATH, train_path=TRAIN_PATH, test_path=TEST_PAT
     feature_cols = [c for c in df_sorted.columns if c not in drop_cols]
 
     X_train = train[feature_cols]
-    y_train = train["daily"].values
+    y_train = np.log1p(train["daily"]) # Log Transform
     X_val = val[feature_cols]
-    y_val = val["daily"].values
+    y_val = np.log1p(val["daily"])     # Log Transform
 
-    print("\nFeature columns:", len(feature_cols))
-    print(feature_cols)
+    print(f"Training with {len(feature_cols)} features (Target Log-Transformed)...")
 
     from itertools import product
 
@@ -455,8 +441,6 @@ def run_xgb(feature_path=FEATURE_PATH, train_path=TRAIN_PATH, test_path=TEST_PAT
             "colsample_bytree": colsample,
             "random_state": SEED,
             "n_jobs": -1,
-
-            # ⭐ 추가된 재현성 옵션
             "tree_method": "hist",
             "sampling_method": "uniform",
             "enable_categorical": False,
@@ -468,8 +452,6 @@ def run_xgb(feature_path=FEATURE_PATH, train_path=TRAIN_PATH, test_path=TEST_PAT
         val_pred_tmp = reg_tmp.predict(X_val)
         rmse_tmp = np.sqrt(mean_squared_error(y_val, val_pred_tmp))
 
-        print(f"params={params} → RMSE={rmse_tmp:.4f}")
-
         if rmse_tmp < best_rmse:
             best_rmse = rmse_tmp
             best_params = params
@@ -478,55 +460,76 @@ def run_xgb(feature_path=FEATURE_PATH, train_path=TRAIN_PATH, test_path=TEST_PAT
     print(best_params)
     print(f">>> Best Val RMSE: {best_rmse:,.4f}")
 
+    # Final Fit
     reg = xgb.XGBRegressor(**best_params)
-    reg.fit(X_train, y_train)
+    reg.fit(df_sorted[feature_cols], np.log1p(df_sorted["daily"]))
 
-    val_pred = reg.predict(X_val)
+    # ---------- (5) Recursive Forecasting for Test (Black Box Simulation) ----------
+    print("\nStarting Recursive Forecasting for Test Set...")
 
-    mae_val = mean_absolute_error(y_val, val_pred)
-    rmse_val = np.sqrt(mean_squared_error(y_val, val_pred))
-    smape_val = smape(y_val, val_pred)
+    history_df = df_train_val.iloc[-60:].copy()
+    test_preds = []
 
-    print("\n===== Validation Performance (with Lags & Rolling, tuned XGBoost) =====")
-    print(f"MAE   : {mae_val:,.2f}")
-    print(f"RMSE  : {rmse_val:,.2f}")
-    print(f"SMAPE : {smape_val:.2f}%")
+    for idx, row in df_test_static.iterrows():
+        # 1. 현재 예측할 날짜의 기본 정보 가져오기
+        current_row = row.to_frame().T
+        current_row["daily"] = np.nan
 
-    print("\nFeature Importances (Top 30):")
-    fi = pd.Series(reg.feature_importances_, index=feature_cols).sort_values(ascending=False)
-    print(fi.head(30))
+        # 2. History에 임시 추가
+        temp_history = pd.concat([history_df, current_row], ignore_index=True)
 
-    df_test_eval = df_test[df_test["daily"] > 0].copy()
-    if len(df_test_eval) == 0:
-        print("\nNo test rows with daily>0 after lag/rolling/NaN filtering.")
-        return
+        # 3. Feature Engineering (Lag/Rolling)
+        for lag in lag_list:
+            temp_history[f"Lag{lag}"] = temp_history["daily"].shift(lag)
 
-    X_test = df_test_eval[feature_cols]
-    y_test = df_test_eval["daily"].values
-    test_pred = reg.predict(X_test)
+        for win in win_list:
+            roll = temp_history["daily"].rolling(window=win, min_periods=1)
+            temp_history[f"RollingMean{win}"] = roll.mean().shift(1)
+            temp_history[f"RollingStd{win}"] = roll.std(ddof=0).shift(1)
 
-    mae_test = mean_absolute_error(y_test, test_pred)
-    rmse_test = np.sqrt(mean_squared_error(y_test, test_pred))
-    smape_test = smape(y_test, test_pred)
+        # 4. 예측 수행
+        X_test_single = temp_history.iloc[[-1]][feature_cols]
 
-    print("\n===== Test Performance (daily>0 only, tuned XGBoost) =====")
+        # [Bug Fix] Object -> Float 변환
+        X_test_single = X_test_single.astype(float)
+
+        # Predict Log Value
+        pred_log = reg.predict(X_test_single)[0]
+
+        # Inverse Transform (Exp)
+        pred = np.expm1(pred_log)
+
+        test_preds.append(pred)
+
+        # 5. History 업데이트 (예측값을 daily로 확정)
+        current_row["daily"] = pred
+        history_df = pd.concat([history_df, current_row], ignore_index=True).iloc[-60:]
+
+    # ---------- (6) 성능 평가 ----------
+    y_test_actual = df_test_static["daily"].values
+
+    mask = y_test_actual > 0
+    final_actual = y_test_actual[mask]
+    final_pred = np.array(test_preds)[mask]
+
+    mae_test = mean_absolute_error(final_actual, final_pred)
+    rmse_test = np.sqrt(mean_squared_error(final_actual, final_pred))
+    smape_test = smape(final_actual, final_pred)
+
+    print("\n===== Test Performance (Recursive / Black-box / XGBoost) =====")
     print(f"MAE   : {mae_test:,.2f}")
     print(f"RMSE  : {rmse_test:,.2f}")
     print(f"SMAPE : {smape_test:.2f}%")
 
-    result_df = pd.DataFrame({
-        "date": df_test_eval["date"].values,
-        "actual_daily": y_test,
-        "pred_daily": test_pred
-    }).sort_values("date").reset_index(drop=True)
+    result_df = df_test_static.copy()
+    result_df["pred_daily"] = test_preds
+    result_df = result_df[result_df["daily"] > 0]
 
-    result_df.to_csv("xgb_prediction.csv", index=False, encoding="utf-8-sig")
+    result_df = result_df[["date", "daily", "pred_daily"]].rename(columns={"daily": "actual_daily"})
+    result_df.to_csv("xgb_prediction_recursive.csv", index=False, encoding="utf-8-sig")
 
     metrics = {
-        "model": "XGB",
-        "val_MAE": mae_val,
-        "val_RMSE": rmse_val,
-        "val_SMAPE": smape_val,
+        "model": "XGB_Recursive",
         "test_MAE": mae_test,
         "test_RMSE": rmse_test,
         "test_SMAPE": smape_test,
@@ -1184,7 +1187,6 @@ if __name__ == "__main__":
 
 import pandas as pd
 import numpy as np
-from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 import matplotlib.pyplot as plt
 from IPython.display import display
@@ -1195,21 +1197,26 @@ from IPython.display import display
 def smape(y_true, y_pred):
     y_true = np.asarray(y_true, float)
     y_pred = np.asarray(y_pred, float)
-    denom = (np.abs(y_true) + np.abs(y_pred) / 2)
+    # 분모가 0인 경우 처리
+    denom = (np.abs(y_true) + np.abs(y_pred)) / 2.0
     denom[denom == 0] = 1e-8
     return np.mean(np.abs(y_true - y_pred) / denom) * 100
 
-
 # ==========================================================
-# 1. CSV 불러와서 Blending 수행
+# 1. CSV 불러와서 Simple Average Blending 수행
 # ==========================================================
-def build_blend_from_csv():
+def build_simple_blend():
 
     # 1️⃣ 네 가지 예측 파일 로드
-    xgb_df  = pd.read_csv("xgb_prediction.csv")
-    lgb_df  = pd.read_csv("lgbm_prediction.csv")
-    lstm_df = pd.read_csv("lstm_prediction.csv")
-    gru_df  = pd.read_csv("gru_prediction.csv")
+    # (파일 이름은 사용자의 환경에 맞게 수정 필요)
+    try:
+        xgb_df  = pd.read_csv("xgb_prediction_recursive.csv") # Recursive 결과 사용 권장
+        lgb_df  = pd.read_csv("lgbm_prediction_recursive.csv")
+        lstm_df = pd.read_csv("lstm_prediction.csv")
+        gru_df  = pd.read_csv("gru_prediction.csv")
+    except FileNotFoundError:
+        print("파일을 찾을 수 없습니다. 파일명을 확인해주세요.")
+        return None
 
     # 2️⃣ 컬럼명 통일
     xgb_df  = xgb_df.rename(columns={"pred_daily": "pred_xgb"})
@@ -1218,56 +1225,80 @@ def build_blend_from_csv():
     gru_df  = gru_df.rename(columns={"예측매출": "pred_gru"})
 
     # 3️⃣ 날짜 기준으로 inner join
-    base = xgb_df.merge(lgb_df, on="date", how="inner")
-    base = base.merge(lstm_df, on="date", how="inner")
-    base = base.merge(gru_df, on="date", how="inner")
+    # 'actual_daily' 컬럼 이름 충돌 방지 (하나만 남김)
+    base = xgb_df[["date", "actual_daily", "pred_xgb"]].merge(
+        lgb_df[["date", "pred_lgbm"]], on="date", how="inner"
+    )
+    base = base.merge(lstm_df[["date", "pred_lstm"]], on="date", how="inner")
+
+    # GRU가 있다면 추가
+    base = base.merge(gru_df[["date", "pred_gru"]], on="date", how="inner")
 
     base = base.sort_values("date").reset_index(drop=True)
 
     print("\n===== 공통 구간 데이터 (샘플) =====")
     display(base.head())
 
-    # 4️⃣ Linear Regression Blending 학습
+    # 4️⃣ Weighted Blending (가중치 수동 지정)
+    # 정답을 보지 않고 사전에 정의한 가중치를 사용하므로 누수 없음.
+    # GRU에 더 높은 가중치 부여 (예: GRU 0.4, 나머지 0.2)
+
+    w_gru  = 0.4
+    w_xgb  = 0.3
+    w_lgbm = 0.2
+    w_lstm = 0.1
+
+    # 가중치 합이 1이 되는지 확인 (선택 사항이지만 권장)
+    total_w = w_gru + w_xgb + w_lgbm + w_lstm
+    if abs(total_w - 1.0) > 1e-9:
+        print(f"Warning: 가중치 합이 1이 아닙니다 ({total_w}). 의도한 것이 아니라면 확인 필요.")
+
+    base["pred_blend"] = (
+        w_xgb  * base["pred_xgb"] +
+        w_lgbm * base["pred_lgbm"] +
+        w_lstm * base["pred_lstm"] +
+        w_gru  * base["pred_gru"]
+    )
+
+    # 5️⃣ 성능 계산 (평가용)
     y_true = base["actual_daily"].values
-    pred_matrix = base[["pred_xgb", "pred_lgbm", "pred_lstm", "pred_gru"]].values
+    blended_pred = base["pred_blend"].values
 
-    blender = LinearRegression()
-    blender.fit(pred_matrix, y_true)
-    blended_pred = blender.predict(pred_matrix)
-    base["pred_blend"] = blended_pred
-
-    # 5️⃣ 성능 계산
     mae  = mean_absolute_error(y_true, blended_pred)
     rmse = np.sqrt(mean_squared_error(y_true, blended_pred))
     s_mape = smape(y_true, blended_pred)
 
-    print("\n===== [Linear Regression Blending] 성능 =====")
+    print("\n===== [Simple Average Blending] 성능 =====")
     print(f"MAE   : {mae:,.2f}")
     print(f"RMSE  : {rmse:,.2f}")
     print(f"SMAPE : {s_mape:.2f}%")
 
     # 6️⃣ 시각화
+    models = ["pred_xgb", "pred_lgbm", "pred_lstm", "pred_gru"]
     plt.figure(figsize=(18,6))
-    plt.plot(base["date"], base["actual_daily"], label="Actual", linewidth=2)
-    plt.plot(base["date"], base["pred_blend"], label="Blended", linestyle="--")
-    plt.title("Actual vs Blended Predictions")
+    plt.plot(base["date"], base["actual_daily"], label="Actual", linewidth=2, color='black', alpha=0.7)
+    plt.plot(base["date"], base["pred_blend"], label="Blended (Avg)", linestyle="--", color='red', linewidth=2)
+
+    # 개별 모델도 옅게 표시
+    colors = ['blue', 'green', 'orange']
+    for i, model in enumerate(models):
+        plt.plot(base["date"], base[model], label=model, linestyle=":", alpha=0.5, color=colors[i%len(colors)])
+
+    plt.title("Actual vs Blended Predictions (Simple Average)")
     plt.xticks(rotation=45)
     plt.legend()
     plt.tight_layout()
     plt.show()
 
-    return base, blender
-
+    return base
 
 # ==========================================================
 # 실행
 # ==========================================================
-base_df, blend_model = build_blend_from_csv()
+if __name__ == "__main__":
+    base_df = build_simple_blend()
 
-output_path = "blended_prediction.csv"
-base_df.to_csv(output_path, index=False, encoding="utf-8-sig")
-
-print("\n===== Blending 가중치 =====")
-for name, w in zip(["XGB", "LGBM", "LSTM", "GRU"], blend_model.coef_):
-    print(f"{name:5s} : {w:.6f}")
-print(f"Intercept : {blend_model.intercept_:.6f}")
+    if base_df is not None:
+        output_path = "blended_prediction_simple.csv"
+        base_df.to_csv(output_path, index=False, encoding="utf-8-sig")
+        print(f"\n결과 저장 완료: {output_path}")
