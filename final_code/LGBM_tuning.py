@@ -3,6 +3,10 @@ import numpy as np
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 import lightgbm as lgb
 
+FEATURE_PATH = "../Data/Feature.xlsx"
+TRAIN_PATH   = "../Data/POS_train_val.csv"
+TEST_PATH = "../Data/POS_test.csv"
+
 # =========================
 # 1. 유틸 함수들
 # =========================
@@ -48,15 +52,12 @@ def calculate_operating_hours(row):
 # =========================
 # 2. 메인 파이프라인
 # =========================
-def main():
-    FEATURE = "../Data/Feature.xlsx"
-    TRAIN = "../Data/POS_train_val.csv"
-    TEST = "../Data/POS_test.csv"
+def run_lgbm(feature_path=FEATURE_PATH, train_path=TRAIN_PATH, test_path=TEST_PATH):
 
     # ---------- (1) 데이터 로드 ----------
-    feat = pd.read_excel(FEATURE)
-    pos_train = pd.read_csv(TRAIN)
-    pos_test = pd.read_csv(TEST)
+    feat = pd.read_excel(feature_path)
+    pos_train = pd.read_csv(train_path)
+    pos_test = pd.read_csv(test_path)
 
     # 숫자 전처리
     for df in [pos_train, pos_test]:
@@ -248,9 +249,19 @@ def main():
         "pred_daily": test_pred
     }).sort_values("date").reset_index(drop=True)
 
-    print("\n===== Full Test Predictions =====")
-    print(result_df.to_string(index=False))
+    metrics = {
+        "model": "LGBM",
+        "val_MAE": mae_val,
+        "val_RMSE": rmse_val,
+        "val_SMAPE": smape_val,
+        "test_MAE": mae_test,
+        "test_RMSE": rmse_test,
+        "test_SMAPE": smape_test,
+    }
 
+    return metrics, result_df
 
 if __name__ == "__main__":
-    main()
+    metrics, df_pred = run_lgbm()
+    print("\n[DEBUG] LGBM metrics:", metrics)
+    print(df_pred.head())

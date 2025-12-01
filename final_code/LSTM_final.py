@@ -248,15 +248,29 @@ def train_predict_validate():
     print(f"3. SMAPE: {test_smape:.2f} %")
     print("="*50)
 
-    # 시각화 (영어 레이블 사용)
-    df_results = pd.DataFrame({'Date': df_test['date'].values, 'Actual_Sales': y_true_test, 'LSTM_Prediction': y_pred_test})
-    plt.figure(figsize=(16, 6))
-    plt.plot(df_results['Date'], df_results['Actual_Sales'], label='Actual Daily Sales', color='blue')
-    plt.plot(df_results['Date'], df_results['LSTM_Prediction'], label='LSTM Pure Recursive Prediction (Full Meta)', color='red', linestyle='--')
-    plt.title('4. LSTM Prediction (Sales + Full Meta - Pure Recursive) vs. Actual Daily Sales', fontsize=18)
-    plt.xlabel('Date'); plt.ylabel('Daily Sales (KRW)'); plt.legend(loc='upper right')
-    plt.xticks(rotation=45, ha='right'); plt.tight_layout()
-    plt.show()
+    df_results = pd.DataFrame({
+        'date': df_test['date'].values,
+        'actual_daily': y_true_test,
+        'pred_daily': y_pred_test
+    })
+
+    # 🔹 비교용 메트릭 딕셔너리
+    metrics = {
+        "model": "LSTM",
+        "val_MAE": None,
+        "val_RMSE": None,
+        "val_SMAPE": None,
+        "test_MAE": test_mae,
+        "test_RMSE": test_rmse,
+        "test_SMAPE": test_smape,
+    }
+
+    return metrics, df_results
+
+def run_lstm():
+    return train_predict_validate()
 
 if __name__ == '__main__':
-    train_predict_validate()
+    metrics, df_pred = run_lstm()
+    print("\n[DEBUG] LSTM metrics:", metrics)
+    print(df_pred.head())
