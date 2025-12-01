@@ -243,8 +243,8 @@ def main():
         "pred_daily": test_pred
     }).sort_values("date").reset_index(drop=True)
 
-    print("\nTest prediction head:")
-    print(result_df.head(20))
+    print("\n===== Full Test Predictions =====")
+    print(result_df.to_string(index=False))
 
 
 if __name__ == "__main__":
