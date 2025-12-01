@@ -169,8 +169,8 @@ python LSTM_final.py
 
 * Validation 성능 출력
 * Test 성능 출력
-* LightGBM Feature Importance (상위 30개)
-* Test 예측 결과 테이블 (상위 20개)
+* Feature Importance
+* Test 예측 결과 테이블
 
 ---
 
