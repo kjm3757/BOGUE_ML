@@ -7,6 +7,8 @@ from torch.utils.data import Dataset, DataLoader
 import random
 import os
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__)) 
+
 # =========================================================
 # 0) Seed 고정 함수 (매번 다른 시드 적용 예정)
 # =========================================================
@@ -330,14 +332,32 @@ def run_gru(
         comparison_df['daily_actual'], comparison_df['예측매출']
     )
 
+    # 🔹 원래처럼 콘솔에 예쁘게 출력
+    print("\n" + "="*40)
+    print(f"📊 성능 평가 결과 (비교 데이터: {len(comparison_df)}개)")
+    print("="*40)
+    print(f"1. MAE   : {mae:,.2f}")
+    print(f"2. RMSE  : {rmse:,.2f}")
+    print(f"3. SMAPE : {smape_val:.2f} %")
+    print("=" * 40)
+
+    # 🔹 원래처럼 result 폴더에 저장
+    result_dir = os.path.abspath(os.path.join(BASE_DIR, "..", "result"))
+    os.makedirs(result_dir, exist_ok=True)
+
+    out_path = os.path.join(result_dir, "forecast_comparison_result_ensemble.csv")
+    comparison_df.to_csv(out_path, index=False)
+    print(f"\n✅ 비교 결과 저장 완료: {out_path}")
+
+    # 🔹 비교용 metrics (float으로 강제 캐스팅 → np.float64 안 보이게)
     metrics = {
         "model": "GRU_ensemble",
         "val_MAE": None,           # GRU는 validation split이 없으므로 None
         "val_RMSE": None,
         "val_SMAPE": None,
-        "test_MAE": mae,
-        "test_RMSE": rmse,
-        "test_SMAPE": smape_val,
+        "test_MAE": float(mae),
+        "test_RMSE": float(rmse),
+        "test_SMAPE": float(smape_val),
     }
 
     return metrics, comparison_df
