@@ -1264,6 +1264,9 @@ def build_blend_from_csv():
 # ==========================================================
 base_df, blend_model = build_blend_from_csv()
 
+output_path = "blended_prediction.csv"
+base_df.to_csv(output_path, index=False, encoding="utf-8-sig")
+
 print("\n===== Blending 가중치 =====")
 for name, w in zip(["XGB", "LGBM", "LSTM", "GRU"], blend_model.coef_):
     print(f"{name:5s} : {w:.6f}")
