@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 import lightgbm as lgb
+import matplotlib.pyplot as plt  # ← 이 줄만 추가
+
 
 # =========================
 # 1. 유틸 함수들
@@ -251,6 +253,73 @@ def main():
     print("\n===== Full Test Predictions =====")
     print(result_df.to_string(index=False))
 
+    # ==============================
+    # 8. Validation vs Test 분석
+    # ==============================
+    print("\n\n========== Validation vs Test 분석 ==========")
+
+    # 8-1. 날짜 범위 비교
+    print("\n[1] 날짜 범위 확인")
+    print("Train/Val Range:", df_sorted["date"].min(), "~", df_sorted["date"].max())
+    print("Test Range     :", df_test_eval["date"].min(), "~", df_test_eval["date"].max())
+
+    # 8-2. 매출 변동성 비교 (Variance / Std)
+    print("\n[2] 매출 변동성(Variance / Std) 비교")
+    print("Validation daily variance:", y_val.var())
+    print("Validation daily std     :", y_val.std())
+
+    print("\nTest daily variance:", df_test_eval["daily"].var())
+    print("Test daily std     :", df_test_eval["daily"].std())
+
+    # 8-3. Lag / Rolling feature 분포 비교
+    lag_cols = [c for c in feature_cols if "Lag" in c]
+    roll_cols = [c for c in feature_cols if "Rolling" in c]
+
+    print("\n[3] Lag Feature Mean 비교 (Val vs Test)")
+    print("Validation Lag Means:")
+    print(X_val[lag_cols].mean())
+
+    print("\nTest Lag Means:")
+    print(X_test[lag_cols].mean())
+
+    print("\n[4] Rolling Feature Mean 비교 (Val vs Test)")
+    print("Validation Rolling Means:")
+    print(X_val[roll_cols].mean())
+
+    print("\nTest Rolling Means:")
+    print(X_test[roll_cols].mean())
+
+    # 8-4. 이벤트 관련 feature 빈도 비교
+    event_cols = []
+    for c in ["holiday", "exam", "seasonal", "semester"]:
+        if c in feature_cols:
+            event_cols.append(c)
+
+    if event_cols:
+        print("\n[5] 이벤트 Feature(holiday/exam/seasonal/semester) 빈도 비교")
+        print("Validation event frequency (sum of 1's):")
+        print(X_val[event_cols].sum())
+
+        print("\nTest event frequency (sum of 1's):")
+        print(X_test[event_cols].sum())
+    else:
+        print("\n[5] 이벤트 feature(holiday/exam/seasonal/semester)를 feature_cols에서 찾지 못함.")
+
+    # 8-5. Validation vs Test 매출 라인 그래프
+    print("\n[6] Validation vs Test 매출 라인 그래프 표시 중...")
+
+    plt.figure(figsize=(12, 5))
+    plt.plot(val["date"], y_val, label="Validation Daily", marker="o")
+    plt.plot(df_test_eval["date"], y_test, label="Test Daily", marker="o")
+    plt.xticks(rotation=45)
+    plt.title("Daily Revenue: Validation vs Test")
+    plt.xlabel("Date")
+    plt.ylabel("Daily Revenue")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
 
 if __name__ == "__main__":
     main()
+

@@ -77,7 +77,7 @@ def create_data_for_lstm(train_csv, test_csv, calendar_csv):
     try:
         df_train_raw = pd.read_csv(train_csv)
         df_test_raw = pd.read_csv(test_csv)
-        df_calendar_raw = pd.read_excel(calendar_csv)
+        df_calendar_raw = pd.read_csv(calendar_csv)
     except Exception as e:
         print(f"Error: File loading failed. {e}"); return pd.DataFrame(), pd.DataFrame(), []
 
@@ -119,22 +119,16 @@ def create_data_for_lstm(train_csv, test_csv, calendar_csv):
     # 3. 데이터 병합 (POS 데이터 + Meta 데이터)
     # 병합할 Meta 컬럼 목록 (date + 15개 특징)
     merge_cols = ['date'] + meta_features
-
-    # 3. POS 데이터 + Meta 데이터 병합 (date는 건드리지 않고, meta만 0으로 채우기)
-    df_train = pd.merge(df_train, df_calendar[merge_cols], on='date', how='left')
-    df_test  = pd.merge(df_test,  df_calendar[merge_cols], on='date', how='left')
-
-    # ❗ date 컬럼은 절대 fillna(0) 하지 않기
-    # meta 특징들만 결측치 0으로 채우기
-    df_train[meta_features] = df_train[meta_features].fillna(0.0)
-    df_test[meta_features]  = df_test[meta_features].fillna(0.0)
+    
+    # df_calendar에서 Meta 특징만 추출하여 POS 데이터와 병합
+    df_train = pd.merge(df_train, df_calendar[merge_cols], on='date', how='left').fillna(0)
+    df_test = pd.merge(df_test, df_calendar[merge_cols], on='date', how='left').fillna(0)
 
     # 4. 최종 통합 데이터 정렬 및 인덱스 초기화
     df_train = df_train.sort_values('date').reset_index(drop=True)
-    df_test  = df_test.sort_values('date').reset_index(drop=True)
-
+    df_test = df_test.sort_values('date').reset_index(drop=True)
+    
     return df_train, df_test, meta_features
-
 
 # --- 4. 훈련, 예측 및 검증 함수 ---
 def train_predict_validate():
