@@ -33,8 +33,8 @@ BOGUE_ML/
 ├─ result/
 ├─ test_code/
 ├─ test_ipynb/
-├─ **final_ensemble.ipynb**
-├─ **final_ensemble.py**
+├─ final_ensemble.ipynb
+├─ final_ensemble.py
 ├─ github_QR.jpg
 ├─ LICENSE
 ├─ README.md
