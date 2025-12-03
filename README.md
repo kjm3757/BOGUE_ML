@@ -33,6 +33,9 @@ BOGUE_ML/
 ├─ result/
 ├─ test_code/
 ├─ test_ipynb/
+├─ **final_ensemble.ipynb**
+├─ **final_ensemble.py**
+├─ github_QR.jpg
 ├─ LICENSE
 ├─ README.md
 └─ requirements.txt
@@ -85,6 +88,13 @@ ipython
 
 ## 🚀 How to Run
 
+### ▶ 모델 일괄 실행
+
+```bash
+python final_ensemble.py
+```
+
+
 ### ▶ 모델 개별 실행
 
 ```bash
@@ -105,12 +115,6 @@ python LSTM_final.py
 
 ```bash
 python ensemble_models.py
-```
-
-### ▶ 모델 일괄 실행
-
-```bash
-python final_ensemble.py
 ```
 
 ---
