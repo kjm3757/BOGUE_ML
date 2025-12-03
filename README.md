@@ -1,7 +1,7 @@
 # 📊 BOGUE_ML – Campus Cafe Sales Forecasting
 
 이 프로젝트는 **학사 일정 데이터 + POS 매출 데이터**를 이용해  
-캠퍼스 카페의 **일일 매출을 예측하는 머신러닝 모델**을 구현합니다.
+교내 카페의 **일매출을 예측하는 머신러닝 모델**을 구현합니다.
 
 데이터 전처리 → 피처 엔지니어링 → 모델 학습 → 테스트 예측까지  
 완전한 머신러닝 파이프라인으로 구성되어 있습니다.
@@ -13,21 +13,28 @@
 ```
 
 BOGUE_ML/
+├─ 4models_code/
+│   ├─ LGBM_tuning.py
+│   ├─ XGB_tuning.py
+│   ├─ GRU_final.py
+│   └─ LSTM_final.py
 ├─ Data/
 │   ├─ Feature.xlsx
 │   ├─ POS_train_val.csv
 │   └─ POS_test.csv
 ├─ description/
-├─ final_code/
+├─ ensemble_code/
+│   ├─ compare_models.py
+│   ├─ ensemble_models.py
 │   ├─ LGBM_tuning.py
 │   ├─ XGB_tuning.py
-│   └─ GRU_final.py
+│   ├─ GRU_final.py
 │   └─ LSTM_final.py
-├─ ipynb/
 ├─ result/
 ├─ test_code/
+├─ test_ipynb/
 ├─ LICENSE
-├─README.md
+├─ README.md
 └─ requirements.txt
 
 ````
@@ -36,7 +43,7 @@ BOGUE_ML/
 
 ## 🛠️ Environment Setup
 
-아래 명령어 한 번으로 환경을 세팅할 수 있습니다.
+로컬 환경에서 코드 실행 시 아래 명령어 한 번으로 환경을 세팅할 수 있습니다.
 
 ```bash
 pip install -r requirements.txt
@@ -45,12 +52,15 @@ pip install -r requirements.txt
 ### ✔ requirements.txt 내용
 
 ```
-pandas
 numpy
+pandas
 scikit-learn
 lightgbm
 xgboost
-openpyxl
+torch
+matplotlib
+tqdm
+ipython
 ```
 
 ---
@@ -75,28 +85,32 @@ openpyxl
 
 ## 🚀 How to Run
 
-### ▶ LightGBM 모델 실행
+### ▶ 모델 개별 실행
 
 ```bash
 python LGBM.py
 ```
 
-### ▶ XGBoost 모델 실행
-
 ```bash
 python XGB.py
 ```
-
-### ▶ GRU 모델 실행
 
 ```bash
 python GRU_final.py
 ```
 
-### ▶ LSTM 모델 실행
-
 ```bash
 python LSTM_final.py
+```
+
+```bash
+python ensemble_models.py
+```
+
+### ▶ 모델 일괄 실행
+
+```bash
+python final_ensemble.py
 ```
 
 ---
@@ -178,4 +192,6 @@ python LSTM_final.py
 
 **Team BOGUE**
 
-* 강민서 김정민 성세은
+* 컴퓨터공학과 강민서 
+* 컴퓨터공학과 김정민 
+* 휴먼기계바이오공학부 성세은

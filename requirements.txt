@@ -1,6 +1,9 @@
-pandas
 numpy
+pandas
 scikit-learn
 lightgbm
 xgboost
-openpyxl
+torch
+matplotlib
+tqdm
+ipython
